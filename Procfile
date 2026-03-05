@@ -1,1 +1,1 @@
-worker: scarping.py
+worker: python scarping.py
